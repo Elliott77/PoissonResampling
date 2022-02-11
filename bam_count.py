@@ -1,11 +1,7 @@
 #!/usr/bin/env python
-## bam_count_read_indel_independant.py
+## bam_count.py
 
-## What will be the effect of
-## excluding Indels and SNPs near Indels
-## from a read count?
-## we'll see how this count performs on the X-chromosome
-
+## count reads for each allele based on known distinguishing SNPs.
 
 import pysam
 import csv
@@ -14,21 +10,18 @@ import re
 import sys
 import time
 import math
+useage="""
+bam_count.py <BAM> <SNP file> <out file>
+"""
 
 
-#snp_quality_minimum = 60
-##if len(sys.argv) < 2:
+snp_quality_minimum = 0
+##if len(sys.argv) < 3:
 ##    print useage
-#snpFileName = sys.argv[1]
+snpFileName = sys.argv[2]
 original_bam = sys.argv[1]
-snp_quality_minimum = int(sys.argv[2])
+#snp_quality_minimum = int(sys.argv[2])
 out_file = sys.argv[3]
-
-##original_bam = "/Users/Elliott/ngseq/samfiles/arcuate/8494R_Arcuate_FC1_110617_SN343_0146_AC01YBABXX_s_1_NovoEnsTransSAM_sorted.bam"
-##original_bam = "/Users/Elliott/ngseq/samfiles/arcuate/8494R_Arcuate_FC1_110617_SN343_0146_AC01YBABXX_s_1_NovoEnsTransSAM_sorted.bam"
-#original_bam = "/Users/elliottferris/ngseq/samfiles/arcuate/8494R_Arcuate_FC1_110617_SN343_0146_AC01YBABXX_s_1_NovoEnsTransSAM_sorted.bam"
-#original_bam = "/Users/elliottferris/ngseq/samfiles/coni/9925X1_130322_700179R_0401_BC1V3WACXX_3_STP1N150A.bam"
-#original_bam = "/Users/elliottferris/Documents/samfiles/10396X12_muscle_STP1N150A.bam"
 
 ##methods
 def remove_comma(snp):
@@ -54,20 +47,8 @@ def isCAST(seq, snpCAST, index):
     else:
         return False
 
-snpFileName = "/uufs/chpc.utah.edu/common/home/u0368716/ref_seq/FinalVariantReferenceTable_FilterHomVarArcLiverDR_NearIndel.txt"
+##snpFileName = "/uufs/chpc.utah.edu/common/home/u0368716/ref_seq/FinalVariantReferenceTable_FilterHomVarArcLiverDR_NearIndel.txt"
     
-#snpFileName = "/uufs/chpc.utah.edu/common/home/u0368716/ref_seq/FinalVariantReferenceTable_FilterHomVarArcLiverDR_plusQS.txt"
-#snpFileName = "/Users/elliottferris/Documents/Dropbox/Gregg/References/FinalVariantReferenceTable_FilterHomVarArcLiverDR_plus.txt"
-
-#snpFileName = "/Users/elliottferris/Documents/Dropbox/Gregg/References/FinalVariantReferenceTable_FilterHomVarArcLiverDR_plusQS.txt"
-#snpFileName = "/Users/elliottferris/Documents/Dropbox/Gregg/References/FinalVariantReferenceTable_FilterHomVarArcLiverDR_NearIndel.txt"
-#snpFileName = "/Users/elliottferris/Documents/Dropbox/Gregg/References/ProblemSNP.txt"
-##snpFileName ="/Users/elliottferris/Documents/Dropbox/Gregg/References/FinalVariantReferenceTableIndelProximateSNPs.txt" ## only SNPs near Indels
-#snpFileName ="/Users/elliottferris/Documents/Dropbox/Gregg/References/Chr1VarRefTable.txt" ## just 1st chromosome   
-
-##snpFileName ="/Users/elliottferris/Documents/Dropbox/Gregg/References/FinalVariantReferenceTable_Chr1_Indels.txt" ## just 1st chromosome indels  
-#snpFileName ="/Users/elliottferris/Documents/Dropbox/Gregg/References/FinalVariantReferenceTable_FilterHomVarArcLiverDR_NearIndel.txt"
-
 ## open files
 try:
     snpLines = csv.reader(open(snpFileName, "r"), delimiter ="\t")
@@ -104,13 +85,11 @@ already_written = []
 aw_count = 400
 last_pos = 0
 
-
 for line in snpLines:
 
     #print"processing a SNP"
     if float(line[8]) < snp_quality_minimum:  ## skip low quality SNPs
-##        print "veto low quality SNP",
-##        print float(line[8]) 
+
         continue
     if line[9] == "True":  ## skip any SNPs or Indels Near Indels
         #print "skipping Varient Near Indel or Indel"
@@ -127,12 +106,9 @@ for line in snpLines:
     is_indel = "FALSE"
     if len(c57_snp) + len(cast_snp) > 2:
         is_indel = "TRUE"
-##        print "This is and indel"
     if chromosome != last_chr:
-##        print "%d reads to C57 and %d reads to CAST. %d reads to neither" %(countC57, countCAST, count_neither)
         elapsed_time = time.clock() - start_time
-##        print "elapsed time: %f hours\n" %(elapsed_time/3600)
-##        print "now processing: %s" %chromosome
+
 
     last_chr = line[0]
     total_depth = 0
@@ -151,13 +127,8 @@ for line in snpLines:
             #print "already written"
             continue  ## i.e don't count the same read twice
 
-
-        #mapQpass = True
-##        print ord(aligned_read.qual[5]) - 33
         total_read_count += 1                
-        
 
-            
         pos_list = aligned_read.positions
         if long(pos) - 1 in pos_list:
             index = aligned_read.positions.index(long(pos)-1)
@@ -171,31 +142,20 @@ for line in snpLines:
                     l = i[1]
                 if ix1 and l:
                     if index > ix1:    ##only if insertion is upstream of SNP
-##                        print "ix1", ix1, "l", l
                         qstring = aligned_read.query[:ix1] + aligned_read.query[ix1+l:]   ##excize insertion
-##                        print "M"*ix1 + "_" * l
                         break
                     else:
-##                        print"no need to modify query string"
                         qstring = aligned_read.query     ##keep the sting as is
                         break        
         else:
             continue  ## pos -1 not in list
         
         total_depth += 1
-##        baseQ = 10 * math.log(1 + 10**float(ord(aligned_read.qqual[index]) - 64) / 10.0) / math.log(10)
-##        print "baseQ:", baseQ
-##        if len(c57_snp) == len(cast_snp) and ord(aligned_read.qqual[index]) - 33 < 19: ## toggled off 3/26/13
-##            #print "vetoing low quality base(DP4 like filter)"
-##            low_q_snps +=1
-            
-##            continue
+
         
         if len(c57_snp) == len(cast_snp):
             is_indel = False
-##            if aligned_read.aend < int(pos) + len(c57_snp):    ## is the 3' end of the read < 3' end of the insertion
-##                count_neither += 1
-##                continue            
+
             if isC57(qstring, c57_snp, index):
                 countC57 += 1
                 already_written.append(aligned_read.qname)  
@@ -237,18 +197,12 @@ for line in snpLines:
             else:
                 count_neither += 1
                 already_written.append(aligned_read.qname)
-##    if chromosome == "chr2":
-##        break
-##    if snp_count > 100:
-##        break
+
     last_pos = pos            
     print >> f_out, "%s\t%d\t%d" %(line[6], countC57, countCAST)            
                 
 elapsed_time = time.clock() - start_time
-#print "elapsed time: %f hours\n" %(elapsed_time/3600)
+print "elapsed time: %f hours\n" %(elapsed_time/3600)
 samfile.close()
 
-
-## 10SNPS elapsed time: 0.000136 hours 4x + 10
-## 30 SNPs elapsed time: 0.000403 hours
 f_out.close()
