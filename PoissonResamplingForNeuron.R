@@ -1,9 +1,24 @@
 ## PoissonResamplingForNeuron.R
 ## Elliott Ferris
-## We would like to address concenrs
-## that some of our differentially expressed genes are 
-## false positives due to technical noise.
-## parallelized
+## 2017
+
+## modify this script to read in your BAM files and then to order the samples appropriatly.
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("Rsubread")
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("doParallel")
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("foreach")
+install.packages("rjags")
+
 library("foreach")
 library("doParallel")
 
@@ -12,7 +27,75 @@ library("doParallel")
 ## each sample should have a column for each allele.
 ########################################################
 
-drn <- read.csv('<allele-read counts summed by gene>', sep = "\t", header = T, row.names = "Gene")## 
+
+library('Rsubread')
+## Modify to point to your BAM files
+setwd("<directroy with allele split BAM files>")
+bams00 <- list.files()
+bams <- bams00[grepl("bam$", bams00)]
+## order vector of BAM file names so that the bams from the two alleles are next to each other 
+## and F1i F1r samples are grouped together
+## sampel1_genome1.bam
+## sampel1_genome2.bam
+## sampel2_genome1.bam
+## sampel2_genome2.bam
+## sampel3_genome1.bam
+## sampel3_genome2.bam
+## . . .
+bams.ordered <- c(<"sampel1_genome1.bam", "sampel1_genome2.bam", "sampel2_genome1.bam", "sampel2_genome2.bam",. . .>)
+
+counts.list <- featureCounts(bams.ordered, annot.inbuilt = "mm10", nthreads = 25, isPairedEnd = T)
+## could also use gtf file to indicate gene boundries.
+names(counts.list)
+
+counts00 <- counts.list[["counts"]]
+
+mean_read_quantiles <- quantile(rowMeans(counts00), probs = seq(0, 1, 0.01))
+
+
+
+#################################################################################
+## Estimate Biological Coeffeciant of Variation
+#################################################################################
+
+library("edgeR")
+
+
+## supportion functions
+rep2 <- function(x) {return(rep(x, 2))}
+
+makePair <- function(x){
+	count = 0
+	v1 <- rep(NA, 2*length(x))
+	for(i in x){
+		count = count + 2
+		v1[count -1]<- i
+		v1[count] <- i +1
+	}
+	return(v1)
+}
+
+makePairReverse <- function(x){
+	count = 0
+	v1 <- rep(NA, 2*length(x))
+	for(i in x){
+		count = count + 2
+		v1[count]<- i
+		v1[count -1] <- i +1
+	}
+	return(v1)
+}##
+
+sampleSummedCountTable <-function(gs0){
+	sampleSummed <- gs0[,0]; norm_return <- list()
+	for(i in seq(1, ncol(gs0), 2)) {	
+
+		sampleSummed <- cbind(sampleSummed, (gs0[i] + gs0[i+1]))		
+	}
+	return(sampleSummed)	
+}
+
+
 
 
 ########################################################
@@ -144,7 +227,7 @@ Y    <- Xc2 %*% diag(1/sqrt(colSums(Xc2^2)))  # scale columns to length 1
 x <- Y[ , 2] + (1 / tan(theta)) * Y[ , 1]     # final new vector
 cor(x1, x + m)       
 
-m_out <- data.frame(matrix(NA, ncol = 4, nrow = length(drn_mean_read_quantiles)))
+m_out <- data.frame(matrix(NA, ncol = 4, nrow = length(mean_read_quantiles)))
 names(m_out) <- c("Mean", "CorrelationSansPoisson","CorrelationRounded","CorrelationPoisson")
 head(m_out)
 
