@@ -111,42 +111,42 @@ parent <- as.factor(c(rep(c("maternal", "paternal"), 9),rep(c("paternal","matern
 #strain <- as.factor(rep(c("c57", "cast"), 18))
 strain <- as.factor(rep(c("c57", "cast"), 18))
 
-	sampleCounts <- sampleSummedCountTable(counts1)
-	d0 <- DGEList(counts = sampleCounts, group=factor(1:ncol(sampleCounts)), genes = rownames(sampleCounts), remove.zeros=F)
-	calcNormFactors(d0) -> d0
-	d0$samples -> normFactors
+sampleCounts <- sampleSummedCountTable(counts1)
+d0 <- DGEList(counts = sampleCounts, group=factor(1:ncol(sampleCounts)), genes = rownames(sampleCounts), remove.zeros=F)
+calcNormFactors(d0) -> d0
+d0$samples -> normFactors
 
-	lib <- c()
-	nf <- c()
-	for ( j in 1:nrow(normFactors) ) {
-		lib <- c(lib, normFactors[ j, 2], normFactors[ j, 2])
-		nf <- c(nf, normFactors[ j, 3], normFactors[ j, 3])
-	}
+lib <- c()
+nf <- c()
+for ( j in 1:nrow(normFactors) ) {
+	lib <- c(lib, normFactors[ j, 2], normFactors[ j, 2])
+	nf <- c(nf, normFactors[ j, 3], normFactors[ j, 3])
+}
 
-	d <- DGEList(counts = counts1, group = strain, genes = row.names(counts1), remove.zeros = T)
-	calcNormFactors(d) -> d
-	cpm(d, normalized.lib.sizes=T) -> cpm.d  #counts per million normalized by library sizes
-	
-	## set normalization ##################################
-	d$sample -> alleleNorm ##
-	alleleNorm$norm.factors
-	group <- alleleNorm$group ##
-	aN <- data.frame(group, lib, nf)##
-	rownames(aN) <- rownames(alleleNorm) ##
-	colnames(aN) <- colnames(alleleNorm) ##
-	d$samples <- aN	## assign sample-wise normalization factors to the 'd' object
-	#sample<- as.vector(matrix(c(1:18, 1:18), nrow = 2, byrow = T))
-	sample <- as.vector(matrix(c(1:14, 1:14), nrow = 2, byrow = T))
-	
-	mean(aN)		
-	model.matrix(~ sample + strain) -> design
-	d <-estimateGLMCommonDisp(d, design)
-	getPriorN(d)
-	d <- estimateGLMTagwiseDisp(d, design)
-	names(d)
-	head(d$tagwise.dispersion)
-	fit <- glmFit(d, design, dispersion = d$tagwise.dispersion)
-	lrt <- glmLRT(fit)
+d <- DGEList(counts = counts1, group = strain, genes = row.names(counts1), remove.zeros = T)
+calcNormFactors(d) -> d
+cpm <- cpm(d, normalized.lib.sizes=T) #counts per million normalized by library sizes
+
+## set normalization ##################################
+d$sample -> alleleNorm ##
+alleleNorm$norm.factors
+group <- alleleNorm$group ##
+aN <- data.frame(group, lib, nf)##
+rownames(aN) <- rownames(alleleNorm) ##
+colnames(aN) <- colnames(alleleNorm) ##
+d$samples <- aN	## assign sample-wise normalization factors to the 'd' object
+#sample<- as.vector(matrix(c(1:18, 1:18), nrow = 2, byrow = T))
+sample <- as.vector(matrix(c(1:14, 1:14), nrow = 2, byrow = T))
+
+mean(aN)		
+model.matrix(~ sample + strain) -> design
+d <-estimateGLMCommonDisp(d, design)
+getPriorN(d)
+d <- estimateGLMTagwiseDisp(d, design)
+names(d)
+head(d$tagwise.dispersion)
+fit <- glmFit(d, design, dispersion = d$tagwise.dispersion)
+lrt <- glmLRT(fit)
 
 bcv <- sqrt(getDispersion(d)) 
 bcv[1:5]
@@ -482,5 +482,115 @@ for(cor0 in correlations_to_test){
 
 
 write.table(out_ci, "<confidence interval TXT file>", sep = "\t", quote = F)
+
+
+## get normalized read means
+
+library("edgeR")
+library("IDPmisc")
+
+rep2 <- function(x) {return(rep(x, 2))}
+## sum the maternal and paternal counts
+sampleSummedCountTable <-function(gs0){
+	sampleSummed <- gs0[,0]; norm_return <- list()
+	for(i in seq(1, ncol(gs0), 2)) {	
+
+		sampleSummed <- cbind(sampleSummed, (gs0[i] + gs0[i+1]))		
+	}
+	return(sampleSummed)	
+}
+
+getNormReads <- function(counts.table){
+	len <- ncol(counts.table)/2
+	parent1<-c("father", "mother")
+	parent2<-c("mother", "father")
+	f1i_f1r =c(ncol(counts.table)/2,ncol(counts.table)/2)
+	parent<-factor(c(c(rep(parent1, f1i_f1r[1])), c(rep(parent2, f1i_f1r[2])))) 
+	allele <- factor(c(rep(c("C57", "Cast"), len)))
+	sample <- factor(unlist(lapply(1:len, rep2)))
+	## sum the maternal and paternal counts and use the 
+	## for calculating normalization factors to 
+	## be applied to both maternal and paternal counts
+	sampleCounts <- sampleSummedCountTable(counts.table)
+	d0<-DGEList(counts = sampleCounts, group=factor(1:ncol(sampleCounts)), genes = rownames(sampleCounts), remove.zeros=F)
+	calcNormFactors(d0)-> d0
+	d0$samples -> normFactors
+
+	lib <- c()
+	nf <- c()
+	for (j in 1:nrow(normFactors) ) {
+		lib <- c(lib, normFactors[ j, 2], normFactors[ j, 2])
+		nf <- c(nf, normFactors[ j, 3], normFactors[ j, 3])
+	}
+	#return(nf)
+	normalized <- as.data.frame(t(nf * t(as.matrix(counts.table))))
+	return(normalized)
+
+}
+## normaze reads:
+
+counts_norm0 <- getNormReads(counts) ##
+counts_norm <- counts_norm0[rowSums(counts_norm0) > 0,]
+bcv1 <- bcv[names(bcv) %in% row.names(counts_norm)]
+mean_read_quantiles100 <- rowMeans(counts_norm[row.names(counts_norm) %in% names(bcv1),])
+
+setwd("~/Dropbox (GreggLab)/NoncanonicalImprinting/ElliottNetworkFigures/MouseIntrageneNetworkFigures/MeanExpressionSD_PoissonModeling/EdgeREstimatedBCV/")
+load(bcv_robjects[age]) ## bcv
+quantiles_drn <- quantile(bcv, bcv_quantiles)
+names(quantiles_drn) <- bcv_quantiles
+ci_file_name <- paste0("~/Dropbox (GreggLab)/NoncanonicalImprinting/DataSets/MouseCoexpression/CoexpressionCategorizationByPoissonSimulation/", age, "_CI_CoexpressionCategorization0.6_0.4.txt")		
+drn_bcv_read_norm_mean_ci <- read.csv(ci_file_name, sep = "\t", stringsAsFactors = F)[,c(1,2,4,7,15, 16, 17)]
+
+setwd(paste0(path.to.directories, directories[age] ))	
+drn_bcv_read_norm_mean_ci$ConfidentThatRaIsAbove <- as.numeric(NA)
+drn_bcv_read_norm_mean_ci$ConfidentThatRaIsBelow <- as.numeric(NA)
+drn_bcv_read_norm_mean_ci$CI_Width <- as.numeric(NA)
+drn_bcv_read_norm_mean_ci$NearestBCV <- as.numeric(NA)
+drn_bcv_read_norm_mean_ci$NearestExpressionLevel <- as.numeric(NA)	
+drn_bcv_read_norm_mean_ci$RaMedian <- as.numeric(NA)	
+## i <- 1
+for(i in 1:nrow(drn_bcv_read_norm_mean_ci)){  #[1:100,]	
+#	for(i in (1:nrow(drn_bcv_read_norm_mean_ci))[row.names(drn_bcv_read_norm_mean_ci) == "ENSMUSG00000021807"])	{
+	cat(".")
+	bcv_mesured <- drn_bcv_read_norm_mean_ci[i, 2]
+	mesured_exprsn <- drn_bcv_read_norm_mean_ci[i, 1]
+	ra_rnaseq <- drn_bcv_read_norm_mean_ci[i, 3]
+	## BCV_0.05_0.01PoissonBins.txt
+	if(!is.na(sum(mesured_exprsn, bcv_mesured, ra_rnaseq)) ) { 
+		bcv_quantile_name <- names(quantiles_drn)[which(abs(quantiles_drn - bcv_mesured) == min(abs(quantiles_drn - bcv_mesured)))]
+
+		drn_bcv_read_norm_mean_ci$NearestBCV[i] <- (quantiles_drn)[bcv_quantile_name]
+		row_index <- which(abs(mean_read_quantiles100 - mesured_exprsn) == min(abs(mean_read_quantiles100 - mesured_exprsn))) ## closest mean
+		drn_bcv_read_norm_mean_ci$NearestExpressionLevel[i] <- norm_reads_means[row_index]
+
+		simulation_file_name <- paste0("BCV_", bcv_quantile_name,"_" , names(row_index), "PoissonBins.txt")
+		sim0 <- read.csv(simulation_file_name, sep = "\t", header = T)
+
+		names(sim0) <- correlations_col
+		vector.of.cor <- c()
+		relevant_simulated_row <- sim0[which(abs(bin_means - ra_rnaseq ) == min(abs(bin_means - ra_rnaseq ))),][1,]
+		for(k in names(relevant_simulated_row)){
+			vector.of.cor <- c(vector.of.cor, rep(as.numeric(k), relevant_simulated_row[,k]))
+		}
+		q_left_right <- quantile(vector.of.cor, probs = c(0.025, 0.975))
+		left_ci <- q_left_right[1] - 0.05
+		left_ci[left_ci < -1] <- -1
+		right_ci <- q_left_right[2] + 0.05
+		right_ci[right_ci > 1] <- 1
+
+		drn_bcv_read_norm_mean_ci$RaMedian[i] <- quantile(vector.of.cor, probs = c(0.50))[1]
+		drn_bcv_read_norm_mean_ci$ConfidentThatRaIsBelow[i] <-  as.numeric(right_ci)
+		drn_bcv_read_norm_mean_ci$ConfidentThatRaIsAbove[i] <- as.numeric(left_ci)
+		# if(!is.na(sum(mesured_exprsn, bcv_mesured, ra_rnaseq)) ) { # & !all(is.na(high)) 
+			# #print("Not NA")
+	}		
+}
+drn_bcv_read_norm_mean_ci$CI_Width <-(drn_bcv_read_norm_mean_ci$ConfidentThatRaIsBelow - drn_bcv_read_norm_mean_ci$ConfidentThatRaIsAbove)
+#drn_bcv_read_norm_mean_ci_ordered <- drn_bcv_read_norm_mean_ci[with(drn_bcv_read_norm_mean_ci, order(-MeanNormalizedReadDepth, Chr)),]
+#print(head(drn_bcv_read_norm_mean_ci_ordered[,c(1, 2, 4, 7,16,17,20, 22:25)]))
+drn_bcv_read_norm_mean_ci_cc <- drn_bcv_read_norm_mean_ci[complete.cases(drn_bcv_read_norm_mean_ci[,8:9]),]
+drn_bcv_read_norm_mean_ci_out <- drn_bcv_read_norm_mean_ci_cc[with(drn_bcv_read_norm_mean_ci_cc, order(Chr, CI_Width, ConfidentThatRaIsAbove)),]
+write.table(drn_bcv_read_norm_mean_ci_out, paste0("~/Dropbox (GreggLab)/NoncanonicalImprinting/DataSets/SimulationBasedCI_Ken/",  age, "SimulationBased_90CI.txt"), sep = "\t", quote = F)	##
+
 
 
