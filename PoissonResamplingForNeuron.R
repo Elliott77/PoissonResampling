@@ -11,6 +11,11 @@ BiocManager::install("Rsubread")
 if (!requireNamespace("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
 
+BiocManager::install("edgeR")
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
 BiocManager::install("doParallel")
 
 if (!requireNamespace("BiocManager", quietly = TRUE))
@@ -95,7 +100,58 @@ sampleSummedCountTable <-function(gs0){
 	return(sampleSummed)	
 }
 
+counts1 <- read.csv("/Volumes/u0368716/raw_data/GeneSum/AR60_UnbiasedReadGeneSum_ii_noq.txt", sep = "\t", header = T, row.names = "Gene")##
 
+
+dim(counts1)
+library(edgeR)
+#parent <- as.factor(c(rep(c("maternal", "paternal"), 9),rep(c("paternal","maternal"), 9)))
+parent <- as.factor(c(rep(c("maternal", "paternal"), 9),rep(c("paternal","maternal"), 9)))
+
+#strain <- as.factor(rep(c("c57", "cast"), 18))
+strain <- as.factor(rep(c("c57", "cast"), 18))
+
+	sampleCounts <- sampleSummedCountTable(counts1)
+	d0 <- DGEList(counts = sampleCounts, group=factor(1:ncol(sampleCounts)), genes = rownames(sampleCounts), remove.zeros=F)
+	calcNormFactors(d0) -> d0
+	d0$samples -> normFactors
+
+	lib <- c()
+	nf <- c()
+	for ( j in 1:nrow(normFactors) ) {
+		lib <- c(lib, normFactors[ j, 2], normFactors[ j, 2])
+		nf <- c(nf, normFactors[ j, 3], normFactors[ j, 3])
+	}
+
+	d <- DGEList(counts = counts1, group = strain, genes = row.names(counts1), remove.zeros = T)
+	calcNormFactors(d) -> d
+	cpm(d, normalized.lib.sizes=T) -> cpm.d  #counts per million normalized by library sizes
+	
+	## set normalization ##################################
+	d$sample -> alleleNorm ##
+	alleleNorm$norm.factors
+	group <- alleleNorm$group ##
+	aN <- data.frame(group, lib, nf)##
+	rownames(aN) <- rownames(alleleNorm) ##
+	colnames(aN) <- colnames(alleleNorm) ##
+	d$samples <- aN	## assign sample-wise normalization factors to the 'd' object
+	#sample<- as.vector(matrix(c(1:18, 1:18), nrow = 2, byrow = T))
+	sample <- as.vector(matrix(c(1:14, 1:14), nrow = 2, byrow = T))
+	
+	mean(aN)		
+	model.matrix(~ sample + strain) -> design
+	d <-estimateGLMCommonDisp(d, design)
+	getPriorN(d)
+	d <- estimateGLMTagwiseDisp(d, design)
+	names(d)
+	head(d$tagwise.dispersion)
+	fit <- glmFit(d, design, dispersion = d$tagwise.dispersion)
+	lrt <- glmLRT(fit)
+
+bcv <- sqrt(getDispersion(d)) 
+bcv[1:5]
+
+save(bcv, file = "<path to R objects>/bcv.Rd")
 
 
 ########################################################
@@ -347,13 +403,10 @@ tau <- pow(sigma, -2)
 ## for a range of cv's, means, and correlations 
 ##############################################
 
-setwd("<directory with mean read quantiles R object>")
-load( "<mean read quantiles R object>")## drn_mean_read_quantiles
-
 load("<bcv>")## bcv#
 quantiles_drn <- quantile(bcv, seq(0.00,1.0, 0.05))
 names(quantiles_drn) <- seq(0.00,1.0, 0.05)
-drn_mean_read_quantiles
+
 set.seed(1)
 
 
@@ -364,7 +417,7 @@ cores00 <- 24 ##
 for(cor0 in correlations_to_test){
 	print("Simulated Correlation: cor0"); print(cor0)
 	theta <- acos(cor0) 
-	out_ci <- data.frame(matrix(NA, ncol = 0, nrow = length(drn_mean_read_quantiles)))
+	out_ci <- data.frame(matrix(NA, ncol = 0, nrow = length(mean_read_quantiles)))
 	row.names(out_ci) <- names(drn_mean_read_quantiles)
 	for(quantile_name in names(quantiles_drn)){
 		
@@ -372,10 +425,8 @@ for(cor0 in correlations_to_test){
 		print(quantile_name);
 		quantile <- quantiles_drn[quantile_name]
 		registerDoParallel(cores = cores00) 
-	
-		#correlations_resampled <- data.frame(matrix(NA, ncol = 0, nrow = length(drn_mean_read_quantiles)))
-		#row.names(correlations_resampled) <- names(drn_mean_read_quantiles)
-		out <- foreach(m = drn_mean_read_quantiles, .combine = 'rbind', .packages = 'foreach' ) %dopar% { 
+
+		out <- foreach(m = mean_read_quantiles, .combine = 'rbind', .packages = 'foreach' ) %dopar% { 
 			#print(m)
 			cat(".")
 			correlations <- c()
