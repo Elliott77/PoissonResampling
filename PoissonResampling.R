@@ -23,7 +23,7 @@ if (!requireNamespace("BiocManager", quietly = TRUE))
 
 BiocManager::install("foreach")
 install.packages("rjags")
-
+install.packages("IDPmisc")
 library("foreach")
 library("doParallel")
 
@@ -94,13 +94,9 @@ sampleSummedCountTable <- function(gs0){
   return(sampleSummed)	
 }
 
-
-library(edgeR)
-#parent <- as.factor(c(rep(c("maternal", "paternal"), 9),rep(c("paternal","maternal"), 9)))
-
+## modify to reflect parent of origin for you samples
 parent <- as.factor(c(rep(c("maternal", "paternal"), 9),rep(c("paternal","maternal"), 9)))
 
-##
 strain <- as.factor(rep(c("StrainA", "StrainB"), length(bams)/2)
 
 sampleCounts <- sampleSummedCountTable(counts1)
@@ -182,7 +178,7 @@ out <- foreach(i = 1:resampling, .combine = 'cbind', .packages = 'foreach' ) %do
   for(m in seq(1, max0, 5)){
     j <- j + 1
     for(j in seq)
-      maternal0 <- round(rnorm(18, mean = m, sd = 1.4890289))
+      maternal0 <- round(rnorm(length(bams)/2, mean = m, sd = 1.4890289))
     maternal0[maternal0 < 0] <- 0
     paternal0 <- maternal0
     maternal <- (mapply(rpois, 1, as.matrix(maternal0)))
@@ -193,14 +189,9 @@ out <- foreach(i = 1:resampling, .combine = 'cbind', .packages = 'foreach' ) %do
   return(correlations)
   
   for(k in 1:length(MotifDb.Hsap.PFM.dna_repair)) {  
-    #cat(k / length((MotifDb.Hsap.PFM))); cat("  ")
     hit_df_k <- data.frame(matrix(NA, nrow = 1, ncol = 10))
     for(j in 0:9){ ##
-      #col.names[[i + j]] <- paste(names(ear_10species[i + j]), human_coords, sep = ".")
       match_plus <- matchPWM(MotifDb.Hsap.PFM.dna_repair[[k]], ear_10species[[i +j]], min.score = "90%")
-      #print(str(match_plus))
-      #match <- match_plus
-      #match
       if(length(start(match_plus)) > 0){
         hit_df_k[1, j + 1] <- paste0(start(match_plus), collapse = ",")
       } else { hit_df_k[1, j + 1] <- NA }
@@ -304,15 +295,12 @@ for(m in mean_read_quantiles){
   x1 <- dist *m/mean(dist)
   x1 <- rgamma(500, shape = shape*m, rate = rate)	
   #x1 <- (rgamma(n, shape = m/scale0, scale = scale0))
-  quartz("rgamma_x1")
-  plot(density(x1), col = "coral3")
-  abline(v = m)
+
   # corresponding angle
   #x1 <- (rnorm(n, mean = m, sd = 0.09433110 * m))       # fixed given data
   dist <- rgamma(500, shape = shape, rate = rate)	
   x2 <- dist *m/mean(dist)	
   ## x2    <- (rgamma(n, shape = m/scale0, scale = scale0))     # new random data
-  lines(density(x2), col = "gray77")
   X     <- cbind(x1, x2)         # matrix
   Xctr  <- scale(X, center=TRUE, scale=FALSE)   # centered columns (mean 0)
   
@@ -348,7 +336,6 @@ for(m in mean_read_quantiles){
   m_out[i, 4] <- cor(maternal, paternal)
   
 }
-
 
 ##############################################
 ## 
@@ -388,11 +375,8 @@ tau <- pow(sigma, -2)
 ##############################################
 ## for a range of cv's, means, and correlations 
 ##############################################
-
-
 quantiles <- quantile(bcv, seq(0.00,1.0, 0.05))
 names(quantiles) <- seq(0.00,1.0, 0.05)
-
 set.seed(1)
 		    
 correlations_to_test <- seq(0.0, 1, 0.05)
@@ -410,7 +394,6 @@ for(cor0 in correlations_to_test){
     print(quantile_name);
     quantile <- quantiles[quantile_name]
     registerDoParallel(cores = cores00) 
-    
     out <- foreach(m = mean_read_quantiles, .combine = 'rbind', .packages = 'foreach' ) %dopar% { 
       #print(m)
       cat(".")
@@ -453,9 +436,7 @@ for(cor0 in correlations_to_test){
       return(ci_df)
     }
     registerDoParallel(NULL)
-    #print("check 4")
     out_ci <- cbind(out_ci, out)
-    
     
   }
   registerDoParallel(NULL)
@@ -524,15 +505,12 @@ bcv_read_norm_mean_ci$CI_Width <- as.numeric(NA)
 bcv_read_norm_mean_ci$NearestBCV <- as.numeric(NA)
 bcv_read_norm_mean_ci$NearestExpressionLevel <- as.numeric(NA)	
 bcv_read_norm_mean_ci$RaMedian <- as.numeric(NA)	
-## i <- 1
 ## asign cofidecne intervals to genes
 for(i in 1:nrow(bcv_read_norm_mean_ci)){  #[1:100,]	
-  #	for(i in (1:nrow(bcv_read_norm_mean_ci))[row.names(bcv_read_norm_mean_ci) == "ENSMUSG00000021807"])	{
   cat(".")
   bcv_mesured <- bcv_read_norm_mean_ci[i, 2]
   mesured_exprsn <- bcv_read_norm_mean_ci[i, 1]
   ra_rnaseq <- bcv_read_norm_mean_ci[i, 3]
-  ## BCV_0.05_0.01PoissonBins.txt
   if(!is.na(sum(mesured_exprsn, bcv_mesured, ra_rnaseq)) ) { 
     bcv_quantile_name <- names(quantiles)[which(abs(quantiles - bcv_mesured) == min(abs(quantiles - bcv_mesured)))]
     
@@ -559,8 +537,7 @@ for(i in 1:nrow(bcv_read_norm_mean_ci)){  #[1:100,]
     bcv_read_norm_mean_ci$RaMedian[i] <- quantile(vector.of.cor, probs = c(0.50))[1]
     bcv_read_norm_mean_ci$ConfidentThatRaIsBelow[i] <-  as.numeric(right_ci)
     bcv_read_norm_mean_ci$ConfidentThatRaIsAbove[i] <- as.numeric(left_ci)
-    # if(!is.na(sum(mesured_exprsn, bcv_mesured, ra_rnaseq)) ) { # & !all(is.na(high)) 
-    # #print("Not NA")
+
   }		
 }
 bcv_read_norm_mean_ci$CI_Width <-(bcv_read_norm_mean_ci$ConfidentThatRaIsBelow - bcv_read_norm_mean_ci$ConfidentThatRaIsAbove)
