@@ -1,6 +1,3 @@
-## HypothalamusRNAseqEdgeR_ForGit.R
-## Elliott Ferris
-## 1/11/2021
 ## PoissonResamplingForNeuron.R
 ## Elliott Ferris
 ## 2017
