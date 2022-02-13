@@ -1,4 +1,4 @@
-## PoissonResamplingForNeuron.R
+## PoissonResampling.R
 ## Elliott Ferris
 ## 2017
 
