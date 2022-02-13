@@ -47,9 +47,12 @@ bams <- bams00[grepl("bam$", bams00)]
 ## sampel3_genome1.bam
 ## sampel3_genome2.bam
 ## . . .
+## modicy for your BAM files:
 bams.ordered <- c('<"sampel1_genome1.bam", "sampel1_genome2.bam", "sampel2_genome1.bam", "sampel2_genome2.bam",. . .>')
+## indicate the number of cores to be used:
+cores = 24
 
-counts.list <- featureCounts(bams.ordered, annot.inbuilt = "mm10", nthreads = 25, isPairedEnd = T)
+counts.list <- featureCounts(bams.ordered, annot.inbuilt = "mm10", nthreads = cores, isPairedEnd = T)
 
 counts1 <- counts.list[["counts"]]
 
@@ -166,7 +169,7 @@ for(m in seq(1, max0, 5)){
   m_out[i,1] <- m
 }
 
-registerDoParallel(cores = 12) 
+registerDoParallel(cores = cores) 
 resampling <- 100
 max0 <- 500
 correlations_resampled <- data.frame(matrix(NA, ncol = 0, nrow = length(seq(1, max0, 5))))
