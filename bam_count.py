@@ -1,208 +1,241 @@
-#!/usr/bin/env python
-## bam_count.py
+#!/usr/bin/env python3
+"""
+bam_count.py
+Elliott Ferris, 2019
 
-## count reads for each allele based on known distinguishing SNPs.
+Count reads for each allele at known strain-distinguishing SNP positions.
 
-import pysam
+This script avoids indel-induced alignment bias by directly inspecting read
+sequences at SNP positions, making it suitable for short-read (<50 bp) data
+where standard allele-splitting tools may misassign reads near indels.
+
+Requires: pysam
+
+Usage:
+    python bam_count.py <BAM> <SNP_file> <output_file>
+
+Arguments:
+    BAM          Sorted, indexed BAM file
+    SNP_file     Tab-delimited SNP file with columns:
+                   [0] chromosome, [1] position, [3] ref_allele (e.g. C57),
+                   [4] alt_allele (e.g. CAST), [6] gene/exon ID,
+                   [8] SNP quality, [9] near_indel flag ("True"/"False")
+    output_file  Path for tab-delimited output (columns: ID, C57_count, CAST_count)
+"""
+
+import argparse
 import csv
 import os
 import re
 import sys
 import time
-import math
-useage="""
-bam_count.py <BAM> <SNP file> <out file>
-"""
+
+import pysam
 
 
-snp_quality_minimum = 0
-##if len(sys.argv) < 3:
-##    print useage
-snpFileName = sys.argv[2]
-original_bam = sys.argv[1]
-#snp_quality_minimum = int(sys.argv[2])
-out_file = sys.argv[3]
+###############################################################################
+# CONFIGURATION
+###############################################################################
 
-##methods
-def remove_comma(snp):
-    p = re.compile(r"\,")
-    m = p.search(snp)
-    if m:
-        snp2 = snp[:m.start()]        
-    else:
-        snp2 = snp
-    return snp2    
-    
-def isC57(seq, snpC57, index):
-    snp_len = len(snpC57)
-    if seq[index: index + snp_len] == snpC57.upper():
-        return True
-    else:
-        return False
-    
-def isCAST(seq, snpCAST, index):
-    snp_len = len(snpCAST)
-    if seq[index: index + snp_len] == snpCAST.upper():
-        return True
-    else:
-        return False
-
-##snpFileName = "/uufs/chpc.utah.edu/common/home/u0368716/ref_seq/FinalVariantReferenceTable_FilterHomVarArcLiverDR_NearIndel.txt"
-    
-## open files
-try:
-    snpLines = csv.reader(open(snpFileName, "r"), delimiter ="\t")
-except:
-    print "error opening the file", snpFileName
-    
-try:
-    samfile = pysam.Samfile(original_bam, "rb")
-except:
-    print "error opening the bam file", original_bam
-
-f_out = open(out_file, "w")
-
-##print "files opened"
-## start loop
-start_time = time.clock()    
-##print "processing ", original_bam
-
-last_chr = 'chr0'
-lastSNPdepth = 5
-snp_count = 0
-total_read_count = 0
-column_name = os.path.basename(original_bam)[0:-4]
-
-## Column Names
-#print "ChrPos\tMuscle_%s_C57\tMuscle_%s_Cast" %(column_name, column_name)
-print >> f_out, "ChrPos\tMuscle_%s_C57\tMuscle_%s_Cast" %(column_name, column_name)
-
-snpLines.next()
-low_q_read = 0
-low_q_snps = 0
-low_q_read_indel = 0
-already_written = []
-aw_count = 400
-last_pos = 0
-
-for line in snpLines:
-
-    #print"processing a SNP"
-    if float(line[8]) < snp_quality_minimum:  ## skip low quality SNPs
-
-        continue
-    if line[9] == "True":  ## skip any SNPs or Indels Near Indels
-        #print "skipping Varient Near Indel or Indel"
-        continue
-    countC57 = 0
-    countCAST = 0
-    count_neither = 0
-    snp_count +=1
-    chromosome = line[0]
-    pos = long(line[1])
-    chr_pos = "%s_%d" %(chromosome, pos)
-    c57_snp = remove_comma(line[3])
-    cast_snp = remove_comma(line[4])
-    is_indel = "FALSE"
-    if len(c57_snp) + len(cast_snp) > 2:
-        is_indel = "TRUE"
-    if chromosome != last_chr:
-        elapsed_time = time.clock() - start_time
+SNP_QUALITY_MINIMUM = 0  # Minimum SNP quality score to include
 
 
-    last_chr = line[0]
-    total_depth = 0
-    lastSNPdepth = aw_count
-    ## cull already_written list
-    if len(already_written) > (2 * lastSNPdepth + 20):
-        #print "Culling already written list"
-        already_written = already_written[-(2 * lastSNPdepth + 1):]
-    aw_count = 0
-    
-    for aligned_read in samfile.fetch(chromosome, int(pos)-1, int(pos)):
-        aw_count += 1
-        #print "checking with already written list"
-        if abs(last_pos - pos) < 60 and aligned_read.qname in already_written:   ## toggle to trun on/off already written filter
-            already_written.append(aligned_read.qname)
-            #print "already written"
-            continue  ## i.e don't count the same read twice
+###############################################################################
+# HELPER FUNCTIONS
+###############################################################################
 
-        total_read_count += 1                
+def remove_trailing_comma(allele):
+    """Strip anything after the first comma in an allele string."""
+    match = re.search(r",", allele)
+    if match:
+        return allele[:match.start()]
+    return allele
 
-        pos_list = aligned_read.positions
-        if long(pos) - 1 in pos_list:
-            index = aligned_read.positions.index(long(pos)-1)
-            
-            ix1 = False; l = False
-            qstring = aligned_read.query   
-            for i in aligned_read.cigar:    ##extract cigar data               
-                if i[0]== 0:
-                    ix1= i[1]
-                if i[0]== 1:
-                    l = i[1]
-                if ix1 and l:
-                    if index > ix1:    ##only if insertion is upstream of SNP
-                        qstring = aligned_read.query[:ix1] + aligned_read.query[ix1+l:]   ##excize insertion
-                        break
-                    else:
-                        qstring = aligned_read.query     ##keep the sting as is
-                        break        
-        else:
-            continue  ## pos -1 not in list
-        
-        total_depth += 1
 
-        
-        if len(c57_snp) == len(cast_snp):
-            is_indel = False
+def matches_allele(sequence, allele, index):
+    """Check whether the read sequence matches the given allele at the index."""
+    allele_len = len(allele)
+    return sequence[index: index + allele_len] == allele.upper()
 
-            if isC57(qstring, c57_snp, index):
-                countC57 += 1
-                already_written.append(aligned_read.qname)  
-            elif isCAST(qstring, cast_snp, index):
-                countCAST += 1
-                already_written.append(aligned_read.qname)                            
+
+def excise_insertion(query_seq, cigar_tuples, snp_index):
+    """
+    Correct the query sequence for upstream insertions so that the SNP index
+    into the reference remains valid.
+
+    Returns the (possibly corrected) query sequence.
+    """
+    match_len = None
+    insert_len = None
+
+    for op, length in cigar_tuples:
+        if op == 0:  # CIGAR M (match/mismatch)
+            match_len = length
+        elif op == 1:  # CIGAR I (insertion)
+            insert_len = length
+
+        if match_len is not None and insert_len is not None:
+            if snp_index > match_len:
+                # Insertion is upstream of the SNP — excise it
+                return query_seq[:match_len] + query_seq[match_len + insert_len:]
             else:
-                count_neither += 1
-                already_written.append(aligned_read.qname)
-                
-        elif len(c57_snp) > len(cast_snp):
-            aend = aligned_read.aend + 1
-            pos_plus = long(pos) + len(c57_snp)            
-            if aend <= pos_plus:    ## is the 3' end of the read < 3' end of the insertion
-                continue            
-            if isC57(qstring, c57_snp, index):
-                countC57 += 1
-                already_written.append(aligned_read.qname)
-            elif isCAST(qstring, cast_snp, index):
-                countCAST += 1
-                already_written.append(aligned_read.qname)
-            else:
-                count_neither += 1
-                already_written.append(aligned_read.qname)
+                return query_seq
 
-        elif len(c57_snp) < len(cast_snp):
-            aend = aligned_read.aend + 1
-            pos_plus = long(pos) + len(cast_snp)           
-            if aend <= pos_plus:    ## is the 3' end of the read < 3' end of the insertion
-                count_neither += 1
+    return query_seq
+
+
+###############################################################################
+# MAIN
+###############################################################################
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Count allele-specific reads at known SNP positions."
+    )
+    parser.add_argument("bam", help="Sorted, indexed BAM file")
+    parser.add_argument("snp_file", help="Tab-delimited SNP reference file")
+    parser.add_argument("out_file", help="Output file path")
+    parser.add_argument(
+        "--min-quality", type=float, default=SNP_QUALITY_MINIMUM,
+        help="Minimum SNP quality score (default: %(default)s)"
+    )
+    args = parser.parse_args()
+
+    # Open input files
+    try:
+        snp_reader = csv.reader(open(args.snp_file, "r"), delimiter="\t")
+    except IOError:
+        sys.exit(f"Error: cannot open SNP file '{args.snp_file}'")
+
+    try:
+        samfile = pysam.AlignmentFile(args.bam, "rb")
+    except IOError:
+        sys.exit(f"Error: cannot open BAM file '{args.bam}'")
+
+    # Open output file and write header
+    column_name = os.path.basename(args.bam).replace(".bam", "")
+    f_out = open(args.out_file, "w")
+    f_out.write(f"ChrPos\t{column_name}_C57\t{column_name}_CAST\n")
+
+    # Skip header line
+    next(snp_reader)
+
+    # Tracking variables
+    start_time = time.time()
+    last_chr = None
+    last_pos = 0
+    snp_count = 0
+    total_read_count = 0
+    already_written = []
+    aw_count = 400
+
+    # Process each SNP
+    for line in snp_reader:
+        snp_quality = float(line[8])
+        near_indel = line[9]
+
+        # Skip low-quality SNPs
+        if snp_quality < args.min_quality:
+            continue
+
+        # Skip SNPs near indels
+        if near_indel == "True":
+            continue
+
+        chromosome = line[0]
+        pos = int(line[1])
+        c57_allele = remove_trailing_comma(line[3])
+        cast_allele = remove_trailing_comma(line[4])
+        feature_id = line[6]
+
+        snp_count += 1
+        count_c57 = 0
+        count_cast = 0
+        count_neither = 0
+        total_depth = 0
+
+        if chromosome != last_chr:
+            elapsed = time.time() - start_time
+            last_chr = chromosome
+
+        # Cull the already-written list to limit memory usage
+        last_snp_depth = aw_count
+        if len(already_written) > (2 * last_snp_depth + 20):
+            already_written = already_written[-(2 * last_snp_depth + 1):]
+        aw_count = 0
+
+        # Iterate over reads overlapping this SNP position
+        for read in samfile.fetch(chromosome, pos - 1, pos):
+            aw_count += 1
+
+            # Skip reads already counted at a nearby SNP (avoids double-counting)
+            if abs(last_pos - pos) < 60 and read.query_name in already_written:
+                already_written.append(read.query_name)
                 continue
-            if isCAST(qstring, cast_snp, index):
-                countCAST += 1
-                already_written.append(aligned_read.qname)
 
-            elif isC57(qstring, c57_snp, index):
-                countC57 += 1
-                already_written.append(aligned_read.qname)
+            total_read_count += 1
+            ref_positions = read.get_reference_positions()
+
+            if (pos - 1) not in ref_positions:
+                continue
+
+            index = ref_positions.index(pos - 1)
+            query_seq = excise_insertion(
+                read.query_sequence, read.cigartuples or [], index
+            )
+
+            total_depth += 1
+            alleles_equal_length = (len(c57_allele) == len(cast_allele))
+
+            if alleles_equal_length:
+                # Simple SNP — alleles are the same length
+                if matches_allele(query_seq, c57_allele, index):
+                    count_c57 += 1
+                elif matches_allele(query_seq, cast_allele, index):
+                    count_cast += 1
+                else:
+                    count_neither += 1
+                already_written.append(read.query_name)
+
+            elif len(c57_allele) > len(cast_allele):
+                # C57 has the longer allele (insertion relative to CAST)
+                read_end = read.reference_end + 1 if read.reference_end else 0
+                if read_end <= pos + len(c57_allele):
+                    continue  # Read doesn't span the full insertion
+                if matches_allele(query_seq, c57_allele, index):
+                    count_c57 += 1
+                elif matches_allele(query_seq, cast_allele, index):
+                    count_cast += 1
+                else:
+                    count_neither += 1
+                already_written.append(read.query_name)
+
             else:
-                count_neither += 1
-                already_written.append(aligned_read.qname)
+                # CAST has the longer allele (insertion relative to C57)
+                read_end = read.reference_end + 1 if read.reference_end else 0
+                if read_end <= pos + len(cast_allele):
+                    count_neither += 1
+                    continue
+                if matches_allele(query_seq, cast_allele, index):
+                    count_cast += 1
+                elif matches_allele(query_seq, c57_allele, index):
+                    count_c57 += 1
+                else:
+                    count_neither += 1
+                already_written.append(read.query_name)
 
-    last_pos = pos            
-    print >> f_out, "%s\t%d\t%d" %(line[6], countC57, countCAST)            
-                
-elapsed_time = time.clock() - start_time
-print "elapsed time: %f hours\n" %(elapsed_time/3600)
-samfile.close()
+        last_pos = pos
+        f_out.write(f"{feature_id}\t{count_c57}\t{count_cast}\n")
 
-f_out.close()
+    # Cleanup
+    elapsed_time = time.time() - start_time
+    print(f"Processed {snp_count} SNPs, {total_read_count} reads")
+    print(f"Elapsed time: {elapsed_time / 3600:.2f} hours")
+
+    samfile.close()
+    f_out.close()
+
+
+if __name__ == "__main__":
+    main()
+
